@@ -9,4 +9,4 @@ ln -s /Applications "$stage/Applications"
 cp README.md "$stage/Read Me.md"
 cp TESTING.md REPORT.md THIRD_PARTY_NOTICES.md "$stage/"
 hdiutil create -volname suya-unduck -srcfolder "$stage" -ov -format UDZO dist/suya-unduck-0.1.0-arm64.dmg
-shasum -a 256 dist/*.dmg > dist/SHA256SUMS.txt
+(cd dist && shasum -a 256 *.dmg > SHA256SUMS.txt)
