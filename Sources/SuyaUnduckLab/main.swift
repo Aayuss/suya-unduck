@@ -43,7 +43,7 @@ func run(_ seconds: Double, tick: (() -> Void)? = nil) {
             print("duck output: \((try? DuckGuard.read(d.id)).map(String.init(describing:)) ?? "unsupported")")
         }
     case "processes":
-        for a in Hardware.apps() { print("\(a.id) \(a.name) processes=\(a.processes) output=\(a.playing) input=\(a.recording) protected=\(a.protected)") }
+        for a in Hardware.apps() { print("\(a.id) \(a.name) processes=\(a.processes) output=\(a.playing) input=\(a.recording) protected=\(a.protected) userApp=\(Hardware.isUserFacing(a))") }
     case "watch-duck":
         let devices = Hardware.devices().filter(\.output)
         var listeners: [CAListenerToken] = []

@@ -57,7 +57,7 @@ public final class DuckGuard {
         guard status == "active" else { return }
         // The previous listener-only method failed the user's real call. Core Audio
         // may reapply attenuation without a useful property change or readable delta.
-        // Refresh the device command every 500 ms ONLY while the call is active.
+        // Refresh while enabled; the feature no longer depends on call detection.
         let source = DispatchSource.makeTimerSource(queue: .main)
         source.schedule(deadline: .now() + 0.5, repeating: 0.5, leeway: .milliseconds(75))
         source.setEventHandler { [weak self] in
@@ -66,7 +66,7 @@ public final class DuckGuard {
             if self.original.keys.allSatisfy({ self.disabled.contains($0) }) { self.timer?.cancel(); self.timer = nil; self.status = "unavailable" }
         }
         timer = source; source.resume()
-        log("Call-volume guard started: 500 ms refresh plus device listeners")
+        log("Volume guard started: 500 ms refresh while enabled plus device listeners")
     }
     private func apply(_ id: UInt32, force: Bool) {
         guard original[id] != nil, !applying, !disabled.contains(id) else { return }

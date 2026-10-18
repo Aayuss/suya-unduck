@@ -40,22 +40,23 @@ struct VolumeControl: View {
     @Environment(\.colorScheme) private var scheme
     let label: String
     @Binding var value: Float
+    var maximum: Float = 2
     @FocusState private var focused: Bool
-    private func set(_ v: Float) { value = abs(v - 1) <= 0.025 ? 1 : min(max(v, 0), 2) }
+    private func set(_ v: Float) { value = abs(v - 1) <= 0.025 ? 1 : min(max(v, 0), maximum) }
     var body: some View {
         GeometryReader { geo in
             let travel = max(1, geo.size.width - 16)
-            let position = CGFloat(min(max(value, 0), 2) / 2) * travel
+            let position = CGFloat(min(max(value, 0), maximum) / maximum) * travel
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.12)).frame(height: 3).padding(.horizontal, 8)
                 Capsule().fill(Color.accent(for: scheme)).frame(width: position, height: 3).offset(x: 8)
-                Rectangle().fill(Color.primary.opacity(0.22)).frame(width: 1, height: 7).offset(x: 8 + travel / 2)
+                if maximum > 1 { Rectangle().fill(Color.primary.opacity(0.22)).frame(width: 1, height: 7).offset(x: 8 + travel / CGFloat(maximum)) }
                 Circle().fill(scheme == .dark ? Color(hex: 0xF1F1F3) : Color.white)
                     .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
                     .overlay(Circle().stroke(focused ? Color.accent(for: scheme) : Color.primary.opacity(0.16), lineWidth: focused ? 2 : 0.5))
                     .frame(width: 16, height: 16).offset(x: position)
             }.frame(height: 28).contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { set(Float(($0.location.x - 8) / travel) * 2) })
+                .gesture(DragGesture(minimumDistance: 0).onChanged { set(Float(($0.location.x - 8) / travel) * maximum) })
         }.frame(height: 28).focusable().focusEffectDisabled().focused($focused)
             .onKeyPress(.leftArrow) { set(value - 0.01); return .handled }
             .onKeyPress(.rightArrow) { set(value + 0.01); return .handled }

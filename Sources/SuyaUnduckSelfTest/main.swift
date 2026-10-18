@@ -113,7 +113,7 @@ check(decide(playing: false, silent: 10)?.running == true, "stop-io before deadl
 check(decide(playing: false, silent: 1000) != nil, "stop-io retains pipeline")
 policy.resumePolicy = "destroy"
 check(decide(playing: false, silent: 200) == nil, "destroy idle pipeline")
-check(decide(protected: true) == nil, "protected call never processed")
+check(decide(protected: true)?.gain == 0.25, "explicit call-volume adjustment is honored")
 appSetting.muted = true
 check(decide()?.gain == 0, "mute policy")
 appSetting = AppSetting(); appSetting.output = "missing"
@@ -176,4 +176,25 @@ let countAfterFailure = writes
 RunLoop.main.run(until: Date().addingTimeInterval(0.7))
 check(writes == countAfterFailure && guardUnderTest.status == "unavailable", "write failure disables refresh without retry loops")
 guardUnderTest.stop()
+
+check(AppPresentation.showInMixer(isUserApp: true, playing: false, hasSavedVolume: false, hasAudioSession: true), "paused audio-session apps stay visible")
+check(Protection.group("com.apple.avconferenced") == "com.apple.FaceTime", "FaceTime helper has readable owner")
+appSetting = AppSetting(); policy = Settings()
+check(decide(protected: true) == nil, "default call audio bypasses processing")
+appSetting.output = "headphones"
+check(decide(protected: true)?.outputUID == "headphones", "manual call routing overrides main output")
+let movedMain = Decision.desired(setting: appSetting, global: policy, protected: false, playing: true, silentSeconds: 0, call: false, defaultOutput: "speakers", available: ["speakers", "headphones"])
+check(movedMain?.outputUID == "headphones", "specific app device overrides main device")
+let mainMatchesOverride = Decision.desired(setting: appSetting, global: policy, protected: false, playing: true, silentSeconds: 0, call: false, defaultOutput: "headphones", available: ["speakers", "headphones"])
+check(mainMatchesOverride == nil, "matching main and app device needs no unnecessary pipeline")
+appSetting.volume = 0.5
+let disconnected = Decision.desired(setting: appSetting, global: policy, protected: false, playing: true, silentSeconds: 0, call: false, defaultOutput: "speakers", available: ["speakers"])
+check(disconnected?.outputUID == "speakers", "missing per-app device falls back to main")
+let reconnected = Decision.desired(setting: appSetting, global: policy, protected: false, playing: true, silentSeconds: 0, call: false, defaultOutput: "speakers", available: ["speakers", "headphones"])
+check(reconnected?.outputUID == "headphones", "reconnected app override resumes")
+
+policy = Settings(); policy.duckApproved = true; appSetting = AppSetting()
+check(decide(call: false)?.gain == 1, "unduck replay is independent of missed call detection")
+check(decide(protected: true, call: false) == nil, "call app default remains on original path even while unduck is enabled")
+check(decide(playing: false) == nil, "paused unity app needs no replay pipeline")
 print("PASS: \(tests) suya-unduck self-tests, including 2,000,000 concurrent atomic operations")

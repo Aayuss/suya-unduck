@@ -1,25 +1,32 @@
 # suya-unduck
 
-A small native macOS menu bar app for two things:
+A native Apple Silicon macOS menu bar audio mixer with neutral light/dark surfaces and subtle green accents.
 
-- **App volume:** adjust or mute individual music and video apps.
-- **Keep volume during calls:** prevent macOS from lowering your media during FaceTime, WhatsApp and other calls.
+- **App volume:** music, browsers and call apps get independent volume and mute controls. Apps with an audio session stay visible while paused.
+- **Main output:** choose the Mac's default audio output.
+- **Per-app output:** choose a specific device for an app, or **Use main output**. A specific choice overrides the main output. A disconnected device temporarily falls back to main and returns when reconnected.
+- **Microphone:** choose the input device, adjust its hardware level and mute it when supported.
+- **Keep volume during calls:** enabled unducking uses per-app unity replay for playing media and repeated unity commands on the used physical and aggregate outputs. It does not depend on detecting a call first.
 
-The panel uses neutral light/dark surfaces with small green accents. There are no microphone, routing, protection-list, boost or audio-method settings. It follows your Mac's appearance. Call audio stays on its original path; internal audio processes are hidden.
+Call apps stay on their original audio path at default settings. Manually changing a call app's volume/mute/output opts that app into processing; failures return it to its original path. No audio is recorded to disk or uploaded, and no virtual audio driver is installed.
 
 ## Install
 
-Open the DMG from [Releases](https://github.com/Aayuss/suya-unduck/releases), then drag **suya-unduck.app** into Applications. This build requires Apple Silicon and macOS 14.2 or newer.
+Get the DMG from [Releases](https://github.com/Aayuss/suya-unduck/releases). Drag **suya-unduck.app** into Applications. Requires Apple Silicon and macOS 14.2+.
 
-For app volume controls, enable **suya-unduck** in **System Settings → Privacy & Security → Screen & System Audio Recording**. Play audio in an app and it will appear in the mixer. Click its percentage to reset to 100%.
+Enable **suya-unduck** under **Privacy & Security → Screen & System Audio Recording** for app volume/routing. The microphone slider changes hardware settings without recording microphone audio. Devices with no adjustable level are labeled accordingly.
 
-**Keep volume during calls** is one switch. Existing approval from the earlier preview is preserved. Its device command uses an undocumented Core Audio property, refreshed every 500 ms only during detected calls. It applies to the output device without digitally boosting your media. It may need changes after macOS updates. Real-call listening tests remain necessary; see [TESTING.md](TESTING.md).
+The app is ad-hoc signed, not notarized. macOS may require **Open Anyway** or renewed System Audio Recording approval after rebuilding. `SUYA_SIGN_IDENTITY` can select an existing trusted signing identity.
 
-The earlier preview failed a user-reported WhatsApp + YouTube test. Version 0.2.0 addresses call detection that depended only on microphone ownership and a listener-only guard that could miss renewed attenuation. These are implementation corrections, not a claim that a new real-call test has already passed.
+## Unducking implementation
 
-Audio stays on your Mac. No driver installs, uploads or microphone recording. The app is ad-hoc signed and not notarized, so macOS may require **Privacy & Security → Open Anyway** after an update. System audio permission may need enabling again after a rebuild.
+The implementation was compared against [Unduck-Pro](https://github.com/MrRockySL/Unduck-Pro), commit `5dcdd670c64a6fbbc2e5cb2f57c1611005ebd856`. Like its engine, the enabled guard repeatedly writes the undocumented device command every 500 ms, including our aggregate devices, independently of call detection. Media replay is unity-transparent; no digital compensation boost is used. The original C-atomic realtime render path is retained, with no private function lookup or hard clipping at unity.
 
-## Build
+A one-second discovery fallback supplements Core Audio listeners, and opening the panel immediately refreshes the list. This deliberately trades a small amount of periodic work for reliable discovery after two failed previews. The unduck timer stops when disabled, on sleep or quit, and after device errors. Its original property is restored only while the current value still matches its last write.
+
+The earlier builds failed the user's WhatsApp + YouTube listening tests. Read [REPORT.md](REPORT.md) and [TESTING.md](TESTING.md) for the distinction between automated checks, live transport verification and audible call acceptance.
+
+## Build / install from source
 
 ```sh
 ./scripts/selftest.sh
@@ -27,6 +34,4 @@ Audio stays on your Mac. No driver installs, uploads or microphone recording. Th
 ./scripts/install.sh
 ```
 
-The scripts select a compatible SDK and build with `swiftc`/`clang`; `Package.swift` is also included. No third-party packages are required. `SUYA_SIGN_IDENTITY` can select an existing code-signing identity. No certificate is added automatically.
-
-Settings migration backs up the earlier file before simplifying it, keeps app volumes/mutes and the anti-ducking opt-in, and removes old routing/boost behavior. Settings and support logs stay in the user's Library. Public screenshots use sample data.
+The installer gracefully quits the old app, backs up its app/settings, verifies the mounted DMG's app and installs it in Applications. Scripts select a compatible SDK and use `swiftc`/`clang`; a SwiftPM manifest is included. No third-party packages are required. Public screenshots contain sample data only. Support information and live diagnostic snapshots stay local and may contain app/device identifiers.

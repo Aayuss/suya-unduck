@@ -1,6 +1,6 @@
 public enum AppPresentation {
-    public static func showInMixer(isUserApp: Bool, playing: Bool, hasSavedVolume: Bool) -> Bool {
-        isUserApp && (playing || hasSavedVolume)
+    public static func showInMixer(isUserApp: Bool, playing: Bool, hasSavedVolume: Bool, hasAudioSession: Bool = false) -> Bool {
+        isUserApp && (playing || hasSavedVolume || hasAudioSession)
     }
 }
 public enum CallActivity {

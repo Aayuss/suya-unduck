@@ -1,6 +1,6 @@
 Using SDKROOT=$COMPATIBLE_MACOS_SDK
 Built $REPOSITORY/.build/direct-release
-PASS: 71 suya-unduck self-tests, including 2,000,000 concurrent atomic operations
+PASS: 82 suya-unduck self-tests, including 2,000,000 concurrent atomic operations
 Using SDKROOT=$COMPATIBLE_MACOS_SDK
 Built $REPOSITORY/.build/direct-tsan
-PASS: 71 suya-unduck self-tests, including 2,000,000 concurrent atomic operations
+PASS: 82 suya-unduck self-tests, including 2,000,000 concurrent atomic operations

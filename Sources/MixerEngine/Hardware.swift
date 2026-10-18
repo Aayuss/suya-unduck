@@ -22,6 +22,7 @@ public enum Protection {
     public static let known: Set<String> = ["net.whatsapp.WhatsApp", "desktop.WhatsApp", "WhatsApp", "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2", "com.apple.FaceTime", "com.apple.TelephonyUtilities", "com.hnc.Discord", "com.tinyspeck.slackmacgap", "com.skype.skype", "ru.keepcoder.Telegram", "org.telegram.desktop", "org.whispersystems.signal-desktop", "com.cisco.webexmeetingsapp", "Cisco-Systems.Spark"]
     public static func isProtected(_ id: String) -> Bool { known.contains(id) || known.contains { id.hasPrefix($0 + ".") } }
     public static func group(_ id: String) -> String {
+        if ["com.apple.avconferenced", "com.apple.TelephonyUtilities"].contains(id) { return "com.apple.FaceTime" }
         for suffix in [".helper.renderer", ".helper.plugin", ".helper.gpu", ".helper", ".Helper"] { if id.hasSuffix(suffix) { return String(id.dropLast(suffix.count)) } }
         if id.hasPrefix("com.apple.WebKit.") { return "com.apple.Safari" }
         return id
@@ -65,9 +66,13 @@ public enum Hardware {
             let output = (try? id.read(kAudioProcessPropertyIsRunningOutput, initial: UInt32(0))) == 1
             let input = (try? id.read(kAudioProcessPropertyIsRunningInput, initial: UInt32(0))) == 1
             let old = grouped[key]
-            grouped[key] = (owner?.localizedName ?? key, (old?.1 ?? []) + [id], output || (old?.2 ?? false), input || (old?.3 ?? false))
+            grouped[key] = (key == "com.apple.FaceTime" ? "FaceTime" : owner?.localizedName ?? key, (old?.1 ?? []) + [id], output || (old?.2 ?? false), input || (old?.3 ?? false))
         }
         return grouped.map { AudioApp(id: $0.key, name: $0.value.0, processes: $0.value.1.sorted(), playing: $0.value.2, recording: $0.value.3) }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    public static func isUserFacing(_ app: AudioApp) -> Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: app.id).contains { $0.activationPolicy == .regular }
+            || (Protection.isProtected(app.id) && (app.playing || app.recording))
     }
     public static func setDefault(_ id: UInt32, input: Bool) throws { try AudioObjectID.system.write(input ? kAudioHardwarePropertyDefaultInputDevice : kAudioHardwarePropertyDefaultOutputDevice, value: id) }
     private static func inputElements(_ selector: UInt32) -> [UInt32] {

@@ -16,6 +16,18 @@ import CAtomics
     private var systemListeners: [CAListener] = []
     private var processListeners: [CAListener] = []
     private var deviceListeners: [CAListener] = []
+    private var discovery: DispatchSourceTimer?
+    private var observedProcesses = Set<UInt32>()
+    private var observedDevices: [AudioDevice] = []
+    private struct PendingRequest: Equatable {
+        let processes: [UInt32]
+        let output: UInt32
+        let desired: DesiredPipeline
+    }
+    private var pending: [String: (UUID, PendingRequest)] = [:]
+    private let setupQueue = DispatchQueue(label: "com.ayus.suya-unduck.setup", qos: .userInitiated)
+    private var shuttingDown = false
+    private var snapshotSignature = ""
     private var watchdog: DispatchSourceTimer?
     private var failures: [String: [Date]] = [:]
     private var lastCounts: [String: (UInt64, Int)] = [:]
@@ -71,12 +83,24 @@ import CAtomics
         refresh(); persist()
     }
     public func refresh() {
-        guard !sleeping else { return }
+        guard !sleeping, !shuttingDown else { return }
+        if discovery == nil {
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+            timer.setEventHandler { [weak self] in self?.refresh() }
+            discovery = timer; timer.resume()
+        }
         apps = Hardware.apps(); devices = Hardware.devices()
+        let processIDs = Set(apps.flatMap(\.processes))
+        if processIDs != observedProcesses {
+        observedProcesses = processIDs
         processListeners.removeAll()
         for app in apps { for id in app.processes { for selector in [kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput] {
             processListeners.append(CAListener(object: id, address: id.addr(selector), queue: .main) { [weak self] in self?.refresh() })
         } } }
+        }
+        if devices != observedDevices {
+        observedDevices = devices
         deviceListeners.removeAll()
         for device in devices {
             for selector in [kAudioDevicePropertyNominalSampleRate, kAudioDevicePropertyDeviceIsAlive] {
@@ -85,6 +109,7 @@ import CAtomics
             for selector in [kAudioDevicePropertyVolumeScalar, kAudioDevicePropertyMute] {
                 deviceListeners.append(CAListener(object: device.id, address: device.id.addr(selector, kAudioObjectPropertyScopeInput, kAudioObjectPropertyElementWildcard), queue: .main) { [weak self] in self?.changed?() })
             }
+        }
         }
         reconcile()
     }
@@ -121,10 +146,10 @@ import CAtomics
         idleWork?.cancel()
         var nextBoundary: Double?
         let keys = Set(apps.map(\.id))
-        for key in Array(pipelines.keys) where !keys.contains(key) { remove(key) }
+        for key in Set(pipelines.keys).union(pending.keys) where !keys.contains(key) { remove(key) }
         for app in apps {
             let setting = settings.apps[app.id] ?? AppSetting()
-            let protected = app.protected || settings.extraProtected.contains(app.id)
+            let protected = app.protected || settings.extraProtected.contains(app.id) || !Hardware.isUserFacing(app)
             if app.playing { lastOutput[app.id] = Date() }
             let silentSeconds = app.playing ? 0 : lastOutput[app.id].map { Date().timeIntervalSince($0) } ?? .infinity
             if !app.playing && silentSeconds.isFinite && settings.resumePolicy != "keep-running" {
@@ -143,11 +168,34 @@ import CAtomics
             let gain = desired.gain
             if let p = pipelines[app.id], p.processObjectIDs != app.processes || p.outputDeviceID != device.id { remove(app.id) }
             if pipelines[app.id] == nil {
-                do {
-                    let p = try TapPipeline(groupKey: app.id, processObjectIDs: app.processes, outputDeviceID: device.id, outputDeviceUID: device.uid, initialGain: gain, controlQueue: .main)
-                    p.onNeedsRebuild = { [weak self] reason in self?.log(reason); self?.remove(app.id); self?.schedule() }
-                    if desired.running { try p.start() }; pipelines[app.id] = p; errors[app.id] = nil; log("Started \(app.name) → \(device.name), layout=\(String(describing: p.layout))")
-                } catch { errors[app.id] = String(describing: error); failures[app.id, default: []].append(Date()); log("\(app.name): \(error)") }
+                let request = PendingRequest(processes: app.processes, output: device.id, desired: desired)
+                if let existing = pending[app.id], existing.1 == request { continue }
+                let token = UUID(); pending[app.id] = (token, request)
+                // Core Audio can wait for a system permission prompt here. Never block the panel.
+                setupQueue.async { [weak self] in
+                    let result = Result {
+                        let p = try TapPipeline(groupKey: app.id, processObjectIDs: app.processes, outputDeviceID: device.id, outputDeviceUID: device.uid, initialGain: gain, controlQueue: .main)
+                        if desired.running { try p.start() }
+                        return p
+                    }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.pending[app.id]?.0 == token, !self.sleeping, !self.shuttingDown else {
+                            if case .success(let pipeline) = result { DispatchQueue.global(qos: .utility).async { pipeline.destroy() } }
+                            return
+                        }
+                        self.pending[app.id] = nil
+                        switch result {
+                        case .success(let p):
+                            p.onNeedsRebuild = { [weak self] reason in self?.log(reason); self?.remove(app.id); self?.schedule() }
+                            self.pipelines[app.id] = p; self.errors[app.id] = nil
+                            self.log("Started \(app.name) → \(device.name), layout=\(String(describing: p.layout))")
+                        case .failure(let error):
+                            self.errors[app.id] = String(describing: error)
+                            self.failures[app.id, default: []].append(Date()); self.log("\(app.name): \(error)")
+                        }
+                        self.reconcile()
+                    }
+                }
             } else if let p = pipelines[app.id] {
                 p.setGain(gain)
                 do { if desired.running { try p.start() } else { p.stop(); lastCounts[app.id] = nil } }
@@ -158,7 +206,7 @@ import CAtomics
             let work = DispatchWorkItem { [weak self] in self?.reconcile() }; idleWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, nextBoundary), execute: work)
         }
-        let desiredDuck = callActive && settings.duckApproved ? Set([output] + pipelines.values.map(\.aggregateID) + pipelines.values.map(\.outputDeviceID)) : Set<UInt32>()
+        let desiredDuck = settings.duckApproved ? Set([output] + pipelines.values.map(\.aggregateID) + pipelines.values.map(\.outputDeviceID)) : Set<UInt32>()
         if desiredDuck != duckDevices { duck.stop(); duckDevices = desiredDuck; if !desiredDuck.isEmpty { duck.start(devices: Array(desiredDuck), approved: true) } }
         if !pipelines.values.contains(where: \.isRunning) { watchdog?.cancel(); watchdog = nil }
         else if watchdog == nil {
@@ -166,6 +214,7 @@ import CAtomics
             timer.schedule(deadline: .now() + 0.25, repeating: 0.25, leeway: .milliseconds(25))
             timer.setEventHandler { [weak self] in self?.checkHealth() }; watchdog = timer; timer.resume()
         }
+        publishSnapshot()
         changed?()
     }
     private func schedule() {
@@ -187,9 +236,25 @@ import CAtomics
         if !pipelines.values.contains(where: \.isRunning) { watchdog?.cancel(); watchdog = nil }
         changed?()
     }
-    private func remove(_ key: String) { if let p = pipelines.removeValue(forKey: key) { p.destroy(); log("Stopped \(key)") }; lastCounts[key] = nil }
-    public func stop() { idleWork?.cancel(); reconcileWork?.cancel(); duck.stop(); duckDevices = []; for key in Array(pipelines.keys) { remove(key) }; watchdog?.cancel(); watchdog = nil }
-    public func quit() { saveWork?.cancel(); save(); stop() }
+    private func remove(_ key: String) { pending[key] = nil; if let p = pipelines.removeValue(forKey: key) { p.onNeedsRebuild = nil; setupQueue.async { p.destroy() }; log("Stopped \(key)") }; lastCounts[key] = nil }
+    public func stop() { pending.removeAll(); discovery?.cancel(); discovery = nil; idleWork?.cancel(); reconcileWork?.cancel(); duck.stop(); duckDevices = []; for key in Array(pipelines.keys) { remove(key) }; watchdog?.cancel(); watchdog = nil }
+    public func quit() { shuttingDown = true; saveWork?.cancel(); save(); stop() }
+    private func publishSnapshot() {
+        let rows: [[String: Any]] = apps.map { app in
+            ["id": app.id, "name": app.name, "playing": app.playing, "recording": app.recording,
+             "processes": app.processes, "volume": settings.apps[app.id]?.volume ?? 1,
+             "route": settings.apps[app.id]?.output ?? "main-output",
+             "pipeline": pipelines[app.id] != nil, "error": errors[app.id] ?? ""]
+        }
+        let data: [String: Any] = ["version": "0.3.0", "apps": rows, "unduck": duck.status, "enabled": settings.duckApproved,
+            "mainOutput": Hardware.defaultDevice(), "input": Hardware.defaultDevice(input: true)]
+        guard let json = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]),
+              let signature = String(data: json, encoding: .utf8), signature != snapshotSignature else { return }
+        snapshotSignature = signature
+        // Local diagnostics only: no samples or microphone recordings are stored.
+        try? FileManager.default.createDirectory(at: EventLog.folder, withIntermediateDirectories: true)
+        try? json.write(to: EventLog.folder.appendingPathComponent("runtime.json"), options: .atomic)
+    }
     public var unduckStatus: String { duck.status }
     public func diagnostics() -> String {
         "suya-unduck\n\(ProcessInfo.processInfo.operatingSystemVersionString)\nCall: \(callActive)\nKeep volume: \(settings.duckApproved), state: \(duck.status)\n" + devices.map { "\($0.name): \($0.rate) Hz [\($0.uid)]" }.joined(separator: "\n") + "\n" + pipelines.map { key, p in "\(key): callbacks=\(am_get_callbacks(p.shared)), errors=\(am_get_format_errors(p.shared)), peak=\(am_load_peak(p.shared)), layout=\(String(describing: p.layout)), firstCallbacks=\(p.probeReport())" }.joined(separator: "\n") + "\n" + errors.description + "\n" + logLines.joined(separator: "\n")

@@ -1,30 +1,25 @@
-# suya-unduck 0.2.0 report
+# suya-unduck 0.3.0 verification report
 
-## Changes prompted by user evidence
+## Evidence and causes
 
-The user reported that YouTube still became quieter during a WhatsApp call with both preview anti-ducking methods enabled and digital compensation disabled. This is a failed real-call acceptance test for 0.1.0.
+Both earlier previews failed the user's WhatsApp + YouTube unducking test. Screenshots showed an empty mixer while a video was playing and System Audio Recording permission enabled. Fresh live Core Audio probes during confirmed audible playback reported the browser's helper as running output and correctly grouped it to the browser. The old UI depended on listener-driven cached state, and excluded call apps entirely. Opening it did not force a refresh.
 
-Two implementation gaps could explain it:
+The reference Unduck-Pro engine at commit `5dcdd670c64a6fbbc2e5cb2f57c1611005ebd856` refreshes unducking while enabled, not only after a call-detection gate, and replays media through private aggregates. The earlier call-gated implementation could leave the guard inactive throughout a missed call. This identifies concrete implementation gaps; it does not retrospectively prove which specific gate caused every reported attenuation event.
 
-- Call detection required input activity on the grouped calling app. Active output from known call apps now also counts, allowing for helper-owned microphone paths. Browser microphone use and user apps using input/output are included; background speech services do not trigger the guard.
-- The guard relied on property listeners and skipped a command when the readable value was already unity. It now refreshes the device command every 500 ms during a detected call, even without listener events or a readable change. Refreshes stop on call end, error, conflict, sleep or quit. No idle timer is introduced.
+## Corrections
 
-These changes do not establish the exact cause of the earlier incident, nor prove that the new version has passed a real call.
+- One-second discovery fallback, immediate refresh when opening, stable listener registrations and readable grouping of call helpers. User-facing audio sessions stay visible while paused, including call apps.
+- Enabled unduck command refresh every 500 ms independent of call detection; include used physical outputs and our aggregates. Playing media uses the existing bit-exact unity path. No boost, private function lookup or unity clipping.
+- Call audio defaults remain untouched. Explicit manual volume/mute/routing opts that app into a private pipeline; fail-safe handling returns the original path.
+- Restored hardware mic level/mute/input picker, main output picker and per-app output picker. A saved app UID overrides main; missing devices fall back and return when reconnected. Installing does not automatically change system input/output selections.
+- Neutral UI and opaque in-panel device picker. Microphone control modifies hardware properties and does not capture microphone audio.
+- Asynchronous tap setup/teardown keeps macOS permission waits off the panel thread. Pending results are discarded when settings, devices or lifecycle state supersede them.
+- Local-only state snapshots for diagnosing actual installed behavior, with no audio samples. Engineering live-volume verification restores prior settings and captures only the app's panel.
 
-## Interface
+## Verification boundaries
 
-Neutral charcoal/white surfaces, ordinary text and buttons, muted green switch/slider accents. Normal UI contains app volume controls and one call-volume switch. Settings contain login launch, help and reset. Removed microphone controls, routing pickers, protection lists, boost, call-mode and timer settings. Background/system audio processes and untouched call rows are hidden.
+All 82 checks passed both normally and under Thread Sanitizer, including 2,000,000 concurrent atomic operations. The suite covers DSP, atomic concurrency, enabled refresh without listener activity, restoration/error handling, call defaults versus explicit controls, session visibility, output precedence, disconnect fallback and reconnect return. It is run normally and under Thread Sanitizer.
 
-The confirmation surface is fully opaque with a dimmed, noninteractive background; the oversized slider focus border is replaced by a thumb outline. Percent labels reset volume to 100%. The panel follows system appearance and uses appropriate dimensions for each page. Public renders use deterministic sample data only.
+The installed application's actual browser pipeline passed a live check at 80% and 50%: callbacks advanced from 227 to 426, peaks were nonzero, and both samples had zero format errors. The exact prior app setting was restored. macOS initially rejected the old permission identity after the ad-hoc binary changed; the user allowed the final build and transport succeeded. This preview has no stable Apple signing certificate, so another changed binary can require fresh permission. Fixture screenshots do not substitute for this live check. Physical routing to two different outputs, microphone acceptance in System Settings, real-call loudness/clarity and long-duration distortion checks require observation on the actual devices; automated results alone do not establish them.
 
-## Migration and installation
-
-The earlier settings file is backed up locally before migration. Volumes, mute states and existing device-property consent are retained. Legacy replay, digital compensation and routes are disabled/cleared. No system default output/input device or sample rate is changed by this update. The installed app is replaced only after a graceful quit and backed up before replacement.
-
-## Verification scope
-
-DSP, atomic concurrency and policy tests remain in the suite. New regressions cover call detection without same-app microphone ownership, background speech exclusion, visible app filtering, settings migration, scheduled unity refresh without events/readable deltas, no writes after stop, conditional restoration, failure disabling and refusal without approval. Guard tests inject fake property access; they never capture microphone/audio or write real device properties.
-
-Real-call media loudness, call clarity, AirPods transitions, two-hour distortion checks, audible failure recovery and full physical keyboard/VoiceOver acceptance remain pending until actually observed. Private taps use `.mutedWhenTapped`; realtime DSP and gain limiting rules are unchanged. No virtual drivers, private function calls, software boost or audio uploads are added.
-
-Machine-specific state and original diagnostics remain local and excluded from Git. Local/CI test counts and actual installation outcome are reported after execution.
+Machine-specific probes, process IDs, original screenshots and runtime snapshots remain local and excluded from Git. The public report contains only sanitized summaries. Existing app/settings are backed up during installation, and volume/route choices persist by app/device identity.
