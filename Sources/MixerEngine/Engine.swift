@@ -72,7 +72,7 @@ import CAtomics
     }
     public func loadEmptyPreview() { apps = []; settings.apps = [:] }
     public func start() {
-        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyProcessObjectList] {
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultSystemOutputDevice, kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyProcessObjectList] {
             systemListeners.append(CAListener(object: .system, address: AudioObjectID.system.addr(selector), queue: .main) { [weak self] in self?.refresh() })
         }
         let nc = NSWorkspace.shared.notificationCenter
@@ -149,7 +149,9 @@ import CAtomics
         for key in Set(pipelines.keys).union(pending.keys) where !keys.contains(key) { remove(key) }
         for app in apps {
             let setting = settings.apps[app.id] ?? AppSetting()
-            let protected = app.protected || settings.extraProtected.contains(app.id) || !Hardware.isUserFacing(app)
+            let effects = app.id == "com.apple.systemsoundserverd"
+            let protected = app.protected || settings.extraProtected.contains(app.id) || (!Hardware.isUserFacing(app) && !effects)
+            let appDefault = effects ? devices.first { $0.id == Hardware.defaultDevice(systemSounds: true) }?.uid ?? defaultUID : defaultUID
             if app.playing { lastOutput[app.id] = Date() }
             let silentSeconds = app.playing ? 0 : lastOutput[app.id].map { Date().timeIntervalSince($0) } ?? .infinity
             if !app.playing && silentSeconds.isFinite && settings.resumePolicy != "keep-running" {
@@ -157,7 +159,7 @@ import CAtomics
                     nextBoundary = min(nextBoundary ?? .infinity, threshold - silentSeconds)
                 }
             }
-            guard let desired = Decision.desired(setting: setting, global: settings, protected: protected, playing: app.playing, silentSeconds: silentSeconds, call: callActive, defaultOutput: defaultUID, available: available),
+            guard let desired = Decision.desired(setting: setting, global: settings, protected: protected, playing: app.playing, silentSeconds: silentSeconds, call: callActive, defaultOutput: appDefault, available: available, keepReady: effects),
                   let device = devices.first(where: { $0.uid == desired.outputUID }) else { remove(app.id); continue }
             let recent = (failures[app.id] ?? []).filter { Date().timeIntervalSince($0) < 60 }
             failures[app.id] = recent
@@ -206,7 +208,7 @@ import CAtomics
             let work = DispatchWorkItem { [weak self] in self?.reconcile() }; idleWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, nextBoundary), execute: work)
         }
-        let desiredDuck = settings.duckApproved ? Set([output] + pipelines.values.map(\.aggregateID) + pipelines.values.map(\.outputDeviceID)) : Set<UInt32>()
+        let desiredDuck = settings.duckApproved ? Set([output, Hardware.defaultDevice(systemSounds: true)] + pipelines.values.map(\.aggregateID) + pipelines.values.map(\.outputDeviceID)) : Set<UInt32>()
         if desiredDuck != duckDevices { duck.stop(); duckDevices = desiredDuck; if !desiredDuck.isEmpty { duck.start(devices: Array(desiredDuck), approved: true) } }
         if !pipelines.values.contains(where: \.isRunning) { watchdog?.cancel(); watchdog = nil }
         else if watchdog == nil {
@@ -228,9 +230,10 @@ import CAtomics
             let old = lastCounts[key] ?? (0, 0)
             let stalled = old.0 == count ? old.1 + 1 : 0
             lastCounts[key] = (count, stalled)
-            if am_is_failed(p.shared) != 0 || stalled >= 8 {
+            let sourcePlaying = apps.first { $0.id == key }?.playing ?? false
+            if PipelineHealth.shouldStop(failed: am_is_failed(p.shared) != 0, stalledChecks: stalled, sourcePlaying: sourcePlaying) {
                 errors[key] = "Processing stopped; playing normally."
-                failures[key, default: []].append(Date()); log("Fail-safe teardown: \(key)"); remove(key)
+                failures[key, default: []].append(Date()); log("Fail-safe teardown: \(key), callbacks=\(count), errors=\(am_get_format_errors(p.shared)), probe=\(p.probeReport())"); remove(key)
             }
         }
         if !pipelines.values.contains(where: \.isRunning) { watchdog?.cancel(); watchdog = nil }
@@ -243,11 +246,11 @@ import CAtomics
         let rows: [[String: Any]] = apps.map { app in
             ["id": app.id, "name": app.name, "playing": app.playing, "recording": app.recording,
              "processes": app.processes, "volume": settings.apps[app.id]?.volume ?? 1,
-             "route": settings.apps[app.id]?.output ?? "main-output",
+             "route": settings.apps[app.id]?.output ?? (app.id == "com.apple.systemsoundserverd" ? "system-output" : "main-output"),
              "pipeline": pipelines[app.id] != nil, "error": errors[app.id] ?? ""]
         }
-        let data: [String: Any] = ["version": "0.3.0", "apps": rows, "unduck": duck.status, "enabled": settings.duckApproved,
-            "mainOutput": Hardware.defaultDevice(), "input": Hardware.defaultDevice(input: true)]
+        let data: [String: Any] = ["version": "0.4.0", "apps": rows, "unduck": duck.status, "enabled": settings.duckApproved,
+            "mainOutput": Hardware.defaultDevice(), "systemOutput": Hardware.defaultDevice(systemSounds: true), "input": Hardware.defaultDevice(input: true)]
         guard let json = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]),
               let signature = String(data: json, encoding: .utf8), signature != snapshotSignature else { return }
         snapshotSignature = signature

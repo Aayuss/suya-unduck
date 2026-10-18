@@ -1,9 +1,10 @@
 # suya-unduck
 
-A native Apple Silicon macOS menu bar audio mixer with neutral light/dark surfaces and subtle green accents.
+A compact native Apple Silicon macOS menu bar audio mixer with neutral surfaces, subtle green accents and Reduce Motion-aware transitions. Hardware and apps share one scroll area.
 
 - **App volume:** music, browsers and call apps get independent volume and mute controls. Apps with an audio session stay visible while paused.
-- **Main output:** choose the Mac's default audio output.
+- **Main output:** choose the Mac's default audio output and adjust its hardware volume/mute when supported.
+- **System sounds:** select the device for alerts and screenshot effects. The effects replay path stays ready for short sounds while unducking is enabled.
 - **Per-app output:** choose a specific device for an app, or **Use main output**. A specific choice overrides the main output. A disconnected device temporarily falls back to main and returns when reconnected.
 - **Microphone:** choose the input device, adjust its hardware level and mute it when supported.
 - **Keep volume during calls:** enabled unducking uses per-app unity replay for playing media and repeated unity commands on the used physical and aggregate outputs. It does not depend on detecting a call first.
@@ -24,7 +25,7 @@ The implementation was compared against [Unduck-Pro](https://github.com/MrRockyS
 
 A one-second discovery fallback supplements Core Audio listeners, and opening the panel immediately refreshes the list. This deliberately trades a small amount of periodic work for reliable discovery after two failed previews. The unduck timer stops when disabled, on sleep or quit, and after device errors. Its original property is restored only while the current value still matches its last write.
 
-The earlier builds failed the user's WhatsApp + YouTube listening tests. Read [REPORT.md](REPORT.md) and [TESTING.md](TESTING.md) for the distinction between automated checks, live transport verification and audible call acceptance.
+The user confirmed normal YouTube loudness during WhatsApp calls with 0.3.0. Earlier previews failed that test. The 0.4.0 effects change addresses separately reported silent screenshots. Read [REPORT.md](REPORT.md) and [TESTING.md](TESTING.md) for the distinction between automated checks, live transport verification and audible call acceptance.
 
 ## Build / install from source
 

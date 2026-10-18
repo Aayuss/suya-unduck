@@ -197,4 +197,15 @@ policy = Settings(); policy.duckApproved = true; appSetting = AppSetting()
 check(decide(call: false)?.gain == 1, "unduck replay is independent of missed call detection")
 check(decide(protected: true, call: false) == nil, "call app default remains on original path even while unduck is enabled")
 check(decide(playing: false) == nil, "paused unity app needs no replay pipeline")
+check(Protection.group("systemsoundserverd") == "com.apple.systemsoundserverd", "native and CleanShot effect source has stable identity")
+var effectsPolicy = Settings(); effectsPolicy.duckApproved = true; effectsPolicy.resumePolicy = "destroy"
+let effectReady = Decision.desired(setting: AppSetting(), global: effectsPolicy, protected: false, playing: false, silentSeconds: .infinity, call: false, defaultOutput: "effects-output", available: ["speakers", "effects-output"], keepReady: true)
+check(effectReady?.running == true && effectReady?.gain == 1 && effectReady?.outputUID == "effects-output", "brief system effects prearm unity on their own output without waiting for activity")
+effectsPolicy.duckApproved = false
+check(Decision.desired(setting: AppSetting(), global: effectsPolicy, protected: false, playing: false, silentSeconds: .infinity, call: false, defaultOutput: "effects-output", available: ["effects-output"], keepReady: true) == nil, "disabling unduck removes the effects replay path")
+effectsPolicy.duckApproved = true
+check(Decision.desired(setting: AppSetting(), global: effectsPolicy, protected: true, playing: false, silentSeconds: .infinity, call: true, defaultOutput: "effects-output", available: ["effects-output"], keepReady: true) == nil, "prearming never opts protected call audio into capture")
+check(!PipelineHealth.shouldStop(failed: false, stalledChecks: 20, sourcePlaying: false), "idle effects tap is not torn down for waiting on its first short sound")
+check(PipelineHealth.shouldStop(failed: false, stalledChecks: 8, sourcePlaying: true), "stalled playing source still fails safe")
+check(PipelineHealth.shouldStop(failed: true, stalledChecks: 0, sourcePlaying: false), "format errors fail safe even while idle")
 print("PASS: \(tests) suya-unduck self-tests, including 2,000,000 concurrent atomic operations")

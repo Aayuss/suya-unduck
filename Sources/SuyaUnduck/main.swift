@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 import CAtomics
 
 final class KeyablePanel: NSPanel {
@@ -14,6 +15,8 @@ final class KeyablePanel: NSPanel {
     private var monitors: [Any] = []
     private var terminationSignal: DispatchSourceSignal?
     private var screenObservation: AnyCancellable?
+    private var visibilityGeneration = 0
+    private var effectsVerification: DispatchSourceTimer?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         signal(SIGTERM, SIG_IGN)
@@ -23,16 +26,18 @@ final class KeyablePanel: NSPanel {
         item = NSStatusBar.system.statusItem(withLength: 30)
         item.button?.toolTip = "suya-unduck"
         if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"), let original = NSImage(contentsOf: url) {
-            // Template images use the supplied alpha and adapt to light/dark menu bars.
-            let icon = NSImage(size: NSSize(width: 27, height: 18), flipped: false) { rect in
-                original.draw(in: rect, from: NSRect(x: original.size.width * 0.21, y: original.size.height * 0.25, width: original.size.width * 0.60, height: original.size.height * 0.46), operation: .sourceOver, fraction: 1)
+            // Render the supplied transparent artwork tightly at menu-bar size.
+            let icon = NSImage(size: NSSize(width: 28, height: 18), flipped: false) { rect in
+                let source = NSRect(x: original.size.width * 81 / 1254, y: original.size.height * 336 / 1254,
+                                    width: original.size.width * 1093 / 1254, height: original.size.height * 614 / 1254)
+                original.draw(in: NSRect(x: 0, y: 1.1, width: rect.width, height: 15.7), from: source, operation: .sourceOver, fraction: 1)
                 return true
             }
             icon.isTemplate = true; item.button?.image = icon
         }
         item.button?.target = self; item.button?.action = #selector(clicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        panel = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 640), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 560), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]; panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: AppView(model: model))
@@ -56,6 +61,9 @@ final class KeyablePanel: NSPanel {
         else if CommandLine.arguments.contains("--show") { open() }
         else if !UserDefaults.standard.bool(forKey: "onboarded") { model.screen = "Permission"; open(); UserDefaults.standard.set(true, forKey: "onboarded") }
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--verify-effects"), i + 1 < args.count {
+            verifyEffects(reportURL: URL(fileURLWithPath: args[i + 1]))
+        }
         if let i = args.firstIndex(of: "--verify-volume"), i + 1 < args.count,
            let report = args.firstIndex(of: "--verify-report"), report + 1 < args.count {
             verifyVolume(bundle: args[i + 1], reportURL: URL(fileURLWithPath: args[report + 1]))
@@ -71,11 +79,32 @@ final class KeyablePanel: NSPanel {
         guard let button = item.button, let window = button.window else { return }
         let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let height = min(CGFloat(model.screen == "Settings" ? 330 : model.screen == "Permission" ? 390 : 640), visible.height - 16)
-        panel.setFrame(NSRect(x: min(max(rect.midX - 180, visible.minX + 8), visible.maxX - 368), y: max(visible.minY + 8, rect.minY - height - 6), width: 360, height: height), display: true)
-        panel.makeKeyAndOrderFront(nil); model.meters(true)
+        let height = min(CGFloat(model.screen == "Settings" ? 300 : model.screen == "Permission" ? 330 : 560), visible.height - 16)
+        let frame = NSRect(x: min(max(rect.midX - 190, visible.minX + 8), visible.maxX - 388), y: max(visible.minY + 8, rect.minY - height - 6), width: 380, height: height)
+        let wasVisible = panel.isVisible
+        visibilityGeneration += 1
+        if !wasVisible { panel.alphaValue = 0 }
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reduced ? 0 : 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.setFrame(frame, display: true, animate: wasVisible && !reduced)
+            panel.makeKeyAndOrderFront(nil)
+            panel.animator().alphaValue = 1
+        }
+        model.meters(true)
     }
-    @objc func close() { panel?.orderOut(nil); model?.meters(false) }
+    @objc func close() {
+        guard let panel, panel.isVisible else { return }
+        visibilityGeneration += 1; let generation = visibilityGeneration
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.12
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            guard let self, self.visibilityGeneration == generation else { return }
+            panel.orderOut(nil); self.model?.meters(false)
+        }
+    }
     func applicationWillTerminate(_ notification: Notification) { if !CommandLine.arguments.contains("--screenshots") { model?.engine.quit() }; monitors.forEach { NSEvent.removeMonitor($0) } }
     /// Opt-in engineering smoke test on this app's actual signed audio path.
     /// Saves metadata only; restores the user's exact settings after four seconds.
@@ -111,12 +140,40 @@ final class KeyablePanel: NSPanel {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         guard let view = self.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
                         view.cacheDisplay(in: view.bounds, to: rep)
-                        try? rep.representation(using: .png, properties: [:])?.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("live-panel-0.3.0.png"))
+                        try? rep.representation(using: .png, properties: [:])?.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("live-panel-0.4.0.png"))
                     }
                 }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { beginWhenReady() }
+    }
+    /// Metadata-only acceptance aid for brief system effects. No audio is stored.
+    func verifyEffects(reportURL: URL) {
+        let deadline = Date().addingTimeInterval(90)
+        var started: Date?, firstCallbacks: UInt64 = 0, callbacks: UInt64 = 0
+        var peak: Float = 0, errors: UInt64 = 0, events = 0, wasPlaying = false
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: 0.02)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            if let p = self.model.engine.pipelines["com.apple.systemsoundserverd"] {
+                if started == nil { started = Date(); firstCallbacks = am_get_callbacks(p.shared) }
+                callbacks = am_get_callbacks(p.shared)
+                peak = max(peak, am_load_peak(p.shared)); errors = am_get_format_errors(p.shared)
+                let playing = self.model.engine.apps.first { $0.id == "com.apple.systemsoundserverd" }?.playing ?? false
+                if playing && !wasPlaying { events += 1 }; wasPlaying = playing
+            }
+            guard (started.map { Date().timeIntervalSince($0) >= 60 } ?? (Date() >= deadline)) else { return }
+            self.effectsVerification?.cancel(); self.effectsVerification = nil
+            let report: [String: Any] = ["pipeline": started != nil, "callbacks": callbacks >= firstCallbacks ? callbacks - firstCallbacks : 0,
+                "maximumPeak": peak, "formatErrors": errors, "observedEvents": events]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: reportURL, options: .atomic) }
+            if let view = self.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("live-panel-0.4.0.png"))
+            }
+        }
+        effectsVerification = timer; timer.resume()
     }
     func renderScreenshots() {
         let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SUYA_SCREENSHOT_DIR"] ?? NSTemporaryDirectory()).appendingPathComponent("screenshots")
@@ -131,7 +188,7 @@ final class KeyablePanel: NSPanel {
                 if screen == "Dialog" { model.confirmation = ("All app volumes will return to 100% and be unmuted.", {}) }
                 if screen == "Outputs" { model.pickApp(model.engine.apps[0]) }
                 if screen == "Empty" { model.engine.loadEmptyPreview() }
-                let host = NSHostingView(rootView: AppView(model: model)); host.frame = NSRect(x: 0, y: 0, width: 360, height: model.screen == "Settings" ? 330 : model.screen == "Permission" ? 390 : 640)
+                let host = NSHostingView(rootView: AppView(model: model)); host.frame = NSRect(x: 0, y: 0, width: 380, height: model.screen == "Settings" ? 300 : model.screen == "Permission" ? 330 : 560)
                 host.layoutSubtreeIfNeeded()
                 guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
                 host.cacheDisplay(in: host.bounds, to: rep)

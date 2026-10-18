@@ -1,25 +1,25 @@
-# suya-unduck 0.3.0 verification report
+# suya-unduck 0.4.0 verification report
 
-## Evidence and causes
+## Confirmed behavior from 0.3.0
 
-Both earlier previews failed the user's WhatsApp + YouTube unducking test. Screenshots showed an empty mixer while a video was playing and System Audio Recording permission enabled. Fresh live Core Audio probes during confirmed audible playback reported the browser's helper as running output and correctly grouped it to the browser. The old UI depended on listener-driven cached state, and excluded call apps entirely. Opening it did not force a refresh.
+The user confirmed YouTube stays at normal loudness during a WhatsApp call. The installed browser path also passed a metadata-only transport check at 80% and 50%, with advancing callbacks, nonzero signal and zero format errors. This release retains the enabled 500 ms device guard and unity media processing that passed that call check.
 
-The reference Unduck-Pro engine at commit `5dcdd670c64a6fbbc2e5cb2f57c1611005ebd856` refreshes unducking while enabled, not only after a call-detection gate, and replays media through private aggregates. The earlier call-gated implementation could leave the guard inactive throughout a missed call. This identifies concrete implementation gaps; it does not retrospectively prove which specific gate caused every reported attenuation event.
+## Screenshot sound investigation
 
-## Corrections
+The user reported that CleanShot and native screenshots are silent during a WhatsApp call, but CleanShot sounds normally off-call. A 40 ms activity observer saw very short output events from `systemsoundserverd` for the screenshots. Both main and system-effects outputs were the same device. No application mute/route preference accounted for the missing sound.
 
-- One-second discovery fallback, immediate refresh when opening, stable listener registrations and readable grouping of call helpers. User-facing audio sessions stay visible while paused, including call apps.
-- Enabled unduck command refresh every 500 ms independent of call detection; include used physical outputs and our aggregates. Playing media uses the existing bit-exact unity path. No boost, private function lookup or unity clipping.
-- Call audio defaults remain untouched. Explicit manual volume/mute/routing opts that app into a private pipeline; fail-safe handling returns the original path.
-- Restored hardware mic level/mute/input picker, main output picker and per-app output picker. A saved app UID overrides main; missing devices fall back and return when reconnected. Installing does not automatically change system input/output selections.
-- Neutral UI and opaque in-panel device picker. Microphone control modifies hardware properties and does not capture microphone audio.
-- Asynchronous tap setup/teardown keeps macOS permission waits off the panel thread. Pending results are discarded when settings, devices or lifecycle state supersede them.
-- Local-only state snapshots for diagnosing actual installed behavior, with no audio samples. Engineering live-volume verification restores prior settings and captures only the app's panel.
+The old engine excluded the background system-effects source from automatic replay. Its brief events can also end before one-second app discovery. The new engine groups that source as System sounds and keeps its unity replay path ready while unducking is enabled, even while idle. It uses the actual system-effects output, including when that differs from main. Idle sources no longer trigger the active-source stall watchdog; format errors still fail safe. Disabling unducking removes the idle replay; call and microphone protections remain in place. This addresses the observed coverage gap; audible acceptance must still be checked in a real call.
+
+## UI
+
+- Supplied transparent waveform artwork replaces only the menu-bar icon. The application icon remains unchanged.
+- Centered SF Symbol chevrons replace baseline-aligned arrow text.
+- Compact shared app rows combine app name/output and slider/mute. Hardware and apps share one scroll view. The main panel is 380 × 560 points, constrained to the available screen height.
+- Main output level/mute, system-effects output, microphone level/mute/input and per-app output choices remain directly available.
+- Panel fade/resize, navigation, picker/dialog/toast transitions, switch motion, hover/press feedback and slider interaction use short animations. Reduce Motion removes motion effects. Sliders follow dragging directly, without lagging value animations.
 
 ## Verification boundaries
 
-All 82 checks passed both normally and under Thread Sanitizer, including 2,000,000 concurrent atomic operations. The suite covers DSP, atomic concurrency, enabled refresh without listener activity, restoration/error handling, call defaults versus explicit controls, session visibility, output precedence, disconnect fallback and reconnect return. It is run normally and under Thread Sanitizer.
+All 89 checks passed normally and under Thread Sanitizer, including 2,000,000 concurrent atomic operations. Automated policy/DSP/concurrency checks include idle effects prearming, unity gain, effects-device selection, disabling and protected-call bypass. Fixture renders cover light/dark mixer, output picker, settings, permission, reset and empty states. Actual screenshot sound, live call clarity, physical multi-device routing and motion feel require observation on the Mac. Metadata-only live checks do not establish audible loudness or absence of ticks.
 
-The installed application's actual browser pipeline passed a live check at 80% and 50%: callbacks advanced from 227 to 426, peaks were nonzero, and both samples had zero format errors. The exact prior app setting was restored. macOS initially rejected the old permission identity after the ad-hoc binary changed; the user allowed the final build and transport succeeded. This preview has no stable Apple signing certificate, so another changed binary can require fresh permission. Fixture screenshots do not substitute for this live check. Physical routing to two different outputs, microphone acceptance in System Settings, real-call loudness/clarity and long-duration distortion checks require observation on the actual devices; automated results alone do not establish them.
-
-Machine-specific probes, process IDs, original screenshots and runtime snapshots remain local and excluded from Git. The public report contains only sanitized summaries. Existing app/settings are backed up during installation, and volume/route choices persist by app/device identity.
+Machine-specific activity logs, live screenshots and diagnostic snapshots stay in ignored local evidence. Public screenshots contain fixtures only. The installer preserves previous app/settings backups. Ad-hoc signing can require renewed macOS audio permission for a changed binary.

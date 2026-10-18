@@ -1,4 +1,4 @@
-# suya-unduck 0.3.0 verification
+# suya-unduck 0.4.0 verification
 
 ## Automated
 
@@ -12,6 +12,8 @@ The optional engineering launch flags `--verify-volume <bundle-id> --verify-repo
 
 A successful live test requires a playing source, advancing callbacks, a nonzero signal peak and zero format errors. It establishes transport/processing, not audible unducking during a WhatsApp call.
 
+The optional `--verify-effects <private-path>` observes system-effects callback count, maximum peak, format errors and activity-event count for sixty seconds after the pipeline becomes ready. It stores no samples. Take screenshots during this window and separately confirm whether you hear them.
+
 ## Manual acceptance
 
 1. Play YouTube. Its browser must appear within about one second and immediately when opening the panel. Pause and resume; the row should remain. Call apps such as WhatsApp must also appear.
@@ -23,3 +25,6 @@ A successful live test requires a playing source, advancing callbacks, a nonzero
 7. Inspect dark/light themes, device-picker dismissal, opaque reset dialog, keyboard focus, sliders, VoiceOver, screen edges and fullscreen Spaces. Public renders use fixtures; physical interaction remains a separate acceptance check.
 
 If something fails, **Copy support info**. Local runtime metadata under the app's Logs directory also records discovered app activity, selected routes and pipeline/guard state. Review app/device identifiers before sharing publicly.
+
+8. During a WhatsApp call, take CleanShot and native screenshots. Both must sound normally while YouTube stays at normal volume. Repeat off-call and with system effects routed to a different device. A prearmed pipeline with nonzero peak proves transport, not listening acceptance.
+9. Scroll from the hardware controls through all app rows in one viewport. Inspect centered chevrons and the supplied waveform menu icon. Check hover, presses, switches, slider drag/focus, navigation, picker/dialog dismissal and panel open/close with Reduce Motion both enabled and disabled.
