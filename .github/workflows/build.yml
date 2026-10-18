@@ -1,0 +1,25 @@
+name: Build suya-unduck
+on:
+  push:
+    branches: [main, 'codex/**']
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: DSP and concurrency tests, including Thread Sanitizer
+        run: ./scripts/selftest.sh
+      - name: Package app and DMG
+        run: ./scripts/build_dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suya-unduck-arm64
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
