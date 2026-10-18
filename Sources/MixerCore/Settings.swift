@@ -15,6 +15,7 @@ public struct AppSetting: Codable {
     }
 }
 public struct Settings: Codable {
+    public var interfaceVersion = 2
     public var apps: [String: AppSetting] = [:]
     public var resumePolicy = "keep-running"
     public var idleStopSeconds: Double = 30
@@ -28,9 +29,10 @@ public struct Settings: Codable {
     public var theme = "System"
     public var extraProtected: [String] = []
     public init() {}
-    enum CodingKeys: CodingKey { case apps, resumePolicy, idleStopSeconds, destroyIdleSeconds, callMode, replay, duckApproved, compensationEnabled, compensation, browserCalls, theme, extraProtected }
+    enum CodingKeys: CodingKey { case interfaceVersion, apps, resumePolicy, idleStopSeconds, destroyIdleSeconds, callMode, replay, duckApproved, compensationEnabled, compensation, browserCalls, theme, extraProtected }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        interfaceVersion = try c.decodeIfPresent(Int.self, forKey: .interfaceVersion) ?? 1
         apps = try c.decodeIfPresent([String: AppSetting].self, forKey: .apps) ?? [:]
         resumePolicy = try c.decodeIfPresent(String.self, forKey: .resumePolicy) ?? "keep-running"
         idleStopSeconds = min(600, max(5, try c.decodeIfPresent(Double.self, forKey: .idleStopSeconds) ?? 30))
@@ -44,4 +46,17 @@ public struct Settings: Codable {
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "System"
         extraProtected = try c.decodeIfPresent([String].self, forKey: .extraProtected) ?? []
     }
+    public mutating func simplifyInterface() {
+        guard interfaceVersion < 2 else { return }
+        replay = false
+        compensationEnabled = false
+        compensation = 1
+        callMode = "Auto"
+        browserCalls = true
+        resumePolicy = "keep-running"
+        theme = "System"
+        for key in Array(apps.keys) { apps[key]?.output = nil }
+        interfaceVersion = 2
+    }
+
 }

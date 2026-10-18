@@ -11,9 +11,13 @@ final class KeyablePanel: NSPanel {
     private var panel: KeyablePanel!
     private var model: Model!
     private var monitors: [Any] = []
+    private var terminationSignal: DispatchSourceSignal?
     private var screenObservation: AnyCancellable?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        signal(SIGTERM, SIG_IGN)
+        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termination.setEventHandler { NSApp.terminate(nil) }; termination.resume(); terminationSignal = termination
         model = Model(preview: CommandLine.arguments.contains("--screenshots"))
         item = NSStatusBar.system.statusItem(withLength: 30)
         item.button?.toolTip = "suya-unduck"
@@ -27,7 +31,7 @@ final class KeyablePanel: NSPanel {
         }
         item.button?.target = self; item.button?.action = #selector(clicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        panel = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 580), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 480), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]; panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: AppView(model: model))
@@ -48,20 +52,21 @@ final class KeyablePanel: NSPanel {
         }) { monitors.append(monitor) }
         NotificationCenter.default.addObserver(self, selector: #selector(close), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         if CommandLine.arguments.contains("--screenshots") { renderScreenshots(); NSApp.terminate(nil) }
+        else if CommandLine.arguments.contains("--show") { open() }
         else if !UserDefaults.standard.bool(forKey: "onboarded") { model.screen = "Permission"; open(); UserDefaults.standard.set(true, forKey: "onboarded") }
     }
     @objc func clicked() {
         if panel.isVisible { close(); return }
         let event = NSApp.currentEvent
-        model.screen = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true ? "Quick" : "Mixer"
+        model.screen = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true ? "Settings" : "Mixer"
         open()
     }
     func open() {
         guard let button = item.button, let window = button.window else { return }
         let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let height = min(CGFloat(model.screen == "Quick" ? 300 : 580), visible.height - 16)
-        panel.setFrame(NSRect(x: min(max(rect.midX - 190, visible.minX + 8), visible.maxX - 388), y: max(visible.minY + 8, rect.minY - height - 6), width: 380, height: height), display: true)
+        let height = min(CGFloat(model.screen == "Settings" ? 330 : model.screen == "Permission" ? 390 : 480), visible.height - 16)
+        panel.setFrame(NSRect(x: min(max(rect.midX - 180, visible.minX + 8), visible.maxX - 368), y: max(visible.minY + 8, rect.minY - height - 6), width: 360, height: height), display: true)
         panel.makeKeyAndOrderFront(nil); model.meters(true)
     }
     @objc func close() { panel?.orderOut(nil); model?.meters(false) }
@@ -71,9 +76,14 @@ final class KeyablePanel: NSPanel {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for theme in ["Dark", "Light"] {
             model.engine.settings.theme = theme
-            for screen in ["Mixer", "Settings", "Diagnostics", "Permission", "Quick"] {
-                model.screen = screen
-                let host = NSHostingView(rootView: AppView(model: model)); host.frame = NSRect(x: 0, y: 0, width: 380, height: screen == "Quick" ? 300 : 580)
+            for screen in ["Mixer", "Settings", "Permission", "Dialog", "Empty"] {
+                model.engine.loadPreview(); model.engine.settings.theme = theme
+                model.confirmation = nil
+                model.screen = screen == "Dialog" ? "Settings" : "Mixer"
+                if screen == "Settings" || screen == "Permission" { model.screen = screen }
+                if screen == "Dialog" { model.confirmation = ("All app volumes will return to 100% and be unmuted.", {}) }
+                if screen == "Empty" { model.engine.loadEmptyPreview() }
+                let host = NSHostingView(rootView: AppView(model: model)); host.frame = NSRect(x: 0, y: 0, width: 360, height: model.screen == "Settings" ? 330 : model.screen == "Permission" ? 390 : 480)
                 host.layoutSubtreeIfNeeded()
                 guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
                 host.cacheDisplay(in: host.bounds, to: rep)

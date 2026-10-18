@@ -127,4 +127,53 @@ policy.compensationEnabled = true; policy.compensation = 9
 check(decide(call: true)?.gain == 3, "compensation clamped")
 check(decide() == nil, "no compensation outside a call")
 check(Protection.isProtected("net.whatsapp.WhatsApp.ServiceExtension"), "call extension protected")
+
+check(CallActivity.isCall(knownCallApp: true, browser: false, userApp: true, playing: true, recording: false), "WhatsApp output detects call even with helper-owned mic")
+check(CallActivity.isCall(knownCallApp: true, browser: false, userApp: false, playing: false, recording: true), "call audio helper input detects call")
+check(!CallActivity.isCall(knownCallApp: true, browser: false, userApp: true, playing: false, recording: false), "idle WhatsApp does not enable timer")
+check(CallActivity.isCall(knownCallApp: false, browser: true, userApp: true, playing: false, recording: true), "browser call input detects call")
+check(!CallActivity.isCall(knownCallApp: false, browser: false, userApp: false, playing: true, recording: true), "background speech helper does not detect call")
+check(CallActivity.isCall(knownCallApp: false, browser: false, userApp: true, playing: true, recording: true), "other user call apps detected")
+check(!AppPresentation.showInMixer(isUserApp: false, playing: true, hasSavedVolume: true), "hide internal system audio processes")
+check(AppPresentation.showInMixer(isUserApp: true, playing: true, hasSavedVolume: false), "show playing media apps")
+check(AppPresentation.showInMixer(isUserApp: true, playing: false, hasSavedVolume: true), "retain saved app volume rows")
+var legacy = try! JSONDecoder().decode(Settings.self, from: Data("{\"duckApproved\":true,\"replay\":true,\"compensationEnabled\":true,\"apps\":{\"music\":{\"volume\":0.4,\"muted\":true,\"output\":\"old-device\"}}}".utf8))
+legacy.simplifyInterface()
+check(legacy.duckApproved && !legacy.replay && !legacy.compensationEnabled, "migration preserves anti-duck opt-in and removes hidden processing")
+check(legacy.apps["music"]?.volume == 0.4 && legacy.apps["music"]?.muted == true && legacy.apps["music"]?.output == nil, "migration retains volumes and unmutes no apps")
+check(legacy.interfaceVersion == 2 && legacy.resumePolicy == "keep-running", "simple interface migration versioned")
+
+// Regression for the failed real-call behavior: a constant readable property and
+// no listener events must still receive scheduled unity commands while active.
+var property: [Float] = [0, 0, 0, 0]
+var writes = 0
+var shouldFail = false
+let access = DuckPropertyAccess(read: { _ in property }, write: { _, values in
+    writes += 1
+    if shouldFail { throw NSError(domain: "test", code: 1) }
+    property = values
+}, supported: { _ in true }, observe: { _, _ in {} })
+let guardUnderTest = DuckGuard(access: access)
+guardUnderTest.start(devices: [123], approved: false)
+check(writes == 0, "no approval means no device writes")
+guardUnderTest.start(devices: [123], approved: true)
+check(property == [1, 0, 0, 0] && writes == 1 && guardUnderTest.status == "active", "initial approved unity command")
+RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+check(writes >= 2, "refresh unity even without listener events or readable delta")
+guardUnderTest.stop()
+check(property == [0, 0, 0, 0], "restore original value on call end")
+let countAfterStop = writes
+RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+check(writes == countAfterStop, "no polling or writes after call ends")
+guardUnderTest.start(devices: [123], approved: true)
+property = [0.3, 0, 0, 0]
+let beforeExternalStop = writes
+guardUnderTest.stop()
+check(writes == beforeExternalStop && property[0] == 0.3, "do not overwrite someone else's newer value on exit")
+shouldFail = true
+guardUnderTest.start(devices: [123], approved: true)
+let countAfterFailure = writes
+RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+check(writes == countAfterFailure && guardUnderTest.status == "unavailable", "write failure disables refresh without retry loops")
+guardUnderTest.stop()
 print("PASS: \(tests) suya-unduck self-tests, including 2,000,000 concurrent atomic operations")

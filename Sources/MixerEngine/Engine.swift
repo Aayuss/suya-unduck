@@ -29,10 +29,18 @@ import CAtomics
     private var observers: [NSObjectProtocol] = []
     public private(set) var logLines: [String] = []
     public let settingsURL: URL
-    public init() {
+    public init(preview: Bool = false) {
         settingsURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/suya-unduck/settings.json")
+        if preview { settings = Settings(); return }
         if let data = try? Data(contentsOf: settingsURL) {
-            do { settings = try JSONDecoder().decode(Settings.self, from: data) }
+            do {
+                settings = try JSONDecoder().decode(Settings.self, from: data)
+                if settings.interfaceVersion < 2 {
+                    let backup = settingsURL.deletingLastPathComponent().appendingPathComponent("settings.pre-0.2.0.json")
+                    if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
+                    settings.simplifyInterface()
+                }
+            }
             catch { try? FileManager.default.copyItem(at: settingsURL, to: settingsURL.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")); settings = Settings() }
         } else { settings = Settings() }
     }
@@ -43,13 +51,14 @@ import CAtomics
     }
     /// Deterministic rendering data; no device changes, taps, IO or settings writes.
     public func loadPreview() {
-        settings = Settings()
+        settings = Settings(); settings.duckApproved = true
         devices = [AudioDevice(id: 1, uid: "preview-speakers", name: "Mac speakers", rate: 48000, input: false, output: true), AudioDevice(id: 2, uid: "preview-headphones", name: "Headphones", rate: 48000, input: false, output: true), AudioDevice(id: 3, uid: "preview-mic", name: "Built-in microphone", rate: 48000, input: true, output: false)]
         apps = [AudioApp(id: "com.google.Chrome", name: "Google Chrome", processes: [], playing: true, recording: false), AudioApp(id: "com.spotify.client", name: "Spotify", processes: [], playing: true, recording: false), AudioApp(id: "net.whatsapp.WhatsApp", name: "WhatsApp", processes: [], playing: false, recording: false)]
         var chrome = AppSetting(); chrome.volume = 0.58
         var spotify = AppSetting(); spotify.volume = 0.84; spotify.output = "preview-headphones"
         settings.apps = ["com.google.Chrome": chrome, "com.spotify.client": spotify]
     }
+    public func loadEmptyPreview() { apps = []; settings.apps = [:] }
     public func start() {
         for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyProcessObjectList] {
             systemListeners.append(CAListener(object: .system, address: AudioObjectID.system.addr(selector), queue: .main) { [weak self] in self?.refresh() })
@@ -58,7 +67,8 @@ import CAtomics
         observers.append(nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.sleeping = true; self?.stop() })
         observers.append(nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.sleeping = false; self?.refresh() } })
         duck.log = { [weak self] in self?.log($0) }
-        refresh()
+        duck.onStatusChange = { [weak self] in self?.changed?() }
+        refresh(); persist()
     }
     public func refresh() {
         guard !sleeping else { return }
@@ -97,7 +107,14 @@ import CAtomics
     public func reconcile() {
         guard !sleeping else { return }
         let browsers = ["com.google.Chrome", "com.apple.Safari", "org.mozilla.firefox", "com.microsoft.edgemac", "company.thebrowser.Browser", "com.brave.Browser"]
-        callActive = settings.callMode == "Always" || (settings.callMode == "Auto" && apps.contains { $0.recording && (Protection.isProtected($0.id) || (settings.browserCalls && browsers.contains($0.id))) })
+        let wasCallActive = callActive
+        let activeCalls = apps.filter { app in
+            let foregroundApp = NSRunningApplication.runningApplications(withBundleIdentifier: app.id).contains { $0.activationPolicy == .regular }
+            return CallActivity.isCall(knownCallApp: Protection.isProtected(app.id), browser: browsers.contains(app.id), userApp: foregroundApp, playing: app.playing, recording: app.recording)
+        }
+        callActive = settings.callMode == "Always" || (settings.callMode == "Auto" && !activeCalls.isEmpty)
+        if callActive != wasCallActive { log("Call \(callActive ? "detected" : "ended"): \(activeCalls.map(\.name).joined(separator: ", "))") }
+
         let output = Hardware.defaultDevice()
         let defaultUID = devices.first { $0.id == output }?.uid ?? ""
         let available = Set(devices.filter(\.output).map(\.uid))
@@ -173,7 +190,8 @@ import CAtomics
     private func remove(_ key: String) { if let p = pipelines.removeValue(forKey: key) { p.destroy(); log("Stopped \(key)") }; lastCounts[key] = nil }
     public func stop() { idleWork?.cancel(); reconcileWork?.cancel(); duck.stop(); duckDevices = []; for key in Array(pipelines.keys) { remove(key) }; watchdog?.cancel(); watchdog = nil }
     public func quit() { saveWork?.cancel(); save(); stop() }
+    public var unduckStatus: String { duck.status }
     public func diagnostics() -> String {
-        "suya-unduck\n\(ProcessInfo.processInfo.operatingSystemVersionString)\nCall: \(callActive)\nReplay: \(settings.replay) (unverified)\n" + devices.map { "\($0.name): \($0.rate) Hz [\($0.uid)]" }.joined(separator: "\n") + "\n" + pipelines.map { key, p in "\(key): callbacks=\(am_get_callbacks(p.shared)), errors=\(am_get_format_errors(p.shared)), peak=\(am_load_peak(p.shared)), layout=\(String(describing: p.layout)), firstCallbacks=\(p.probeReport())" }.joined(separator: "\n") + "\n" + errors.description + "\n" + logLines.joined(separator: "\n")
+        "suya-unduck\n\(ProcessInfo.processInfo.operatingSystemVersionString)\nCall: \(callActive)\nKeep volume: \(settings.duckApproved), state: \(duck.status)\n" + devices.map { "\($0.name): \($0.rate) Hz [\($0.uid)]" }.joined(separator: "\n") + "\n" + pipelines.map { key, p in "\(key): callbacks=\(am_get_callbacks(p.shared)), errors=\(am_get_format_errors(p.shared)), peak=\(am_load_peak(p.shared)), layout=\(String(describing: p.layout)), firstCallbacks=\(p.probeReport())" }.joined(separator: "\n") + "\n" + errors.description + "\n" + logLines.joined(separator: "\n")
     }
 }
