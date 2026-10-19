@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 if [ "${SUYA_SKIP_COMPILE:-0}" != 1 ]; then ./scripts/build_dmg.sh; fi
-dmg="$PWD/dist/suya-unduck-0.4.0-arm64.dmg"
+dmg="$PWD/dist/suya-unduck-0.4.1-arm64.dmg"
 mount_dir=$(mktemp -d /tmp/suya-install.XXXXXX)
 stage="/Applications/.suya-unduck-update-$$.app"
 backup="$PWD/dist/local-evidence/installed-backups/$(date +%Y%m%d-%H%M%S)"
@@ -11,7 +11,7 @@ cleanup() { hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rmdir "$mount_d
 trap cleanup EXIT
 hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount_dir" >/dev/null
 codesign --verify --deep --strict "$mount_dir/suya-unduck.app"
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$mount_dir/suya-unduck.app/Contents/Info.plist")" = 0.4.0 ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$mount_dir/suya-unduck.app/Contents/Info.plist")" = 0.4.1 ]
 ditto "$mount_dir/suya-unduck.app" "$stage"
 codesign --verify --deep --strict "$stage"
 swiftc -sdk "$SDKROOT" scripts/terminate_app.swift -o .build/suya-unduck-quit
@@ -27,10 +27,10 @@ fi
 codesign --verify --deep --strict /Applications/suya-unduck.app
 cmp /Applications/suya-unduck.app/Contents/MacOS/suya-unduck "$mount_dir/suya-unduck.app/Contents/MacOS/suya-unduck"
 if [ -n "${SUYA_VERIFY_VOLUME_BUNDLE:-}" ]; then
-  open /Applications/suya-unduck.app --args --show --verify-volume "$SUYA_VERIFY_VOLUME_BUNDLE" --verify-report "$PWD/dist/local-evidence/live-volume-0.4.0.json"
+  open /Applications/suya-unduck.app --args --show --verify-volume "$SUYA_VERIFY_VOLUME_BUNDLE" --verify-report "$PWD/dist/local-evidence/live-volume-0.4.1.json"
 elif [ "${SUYA_VERIFY_EFFECTS:-0}" = 1 ]; then
-  open /Applications/suya-unduck.app --args --show --verify-effects "$PWD/dist/local-evidence/live-effects-0.4.0.json"
+  open /Applications/suya-unduck.app --args --show --verify-effects "$PWD/dist/local-evidence/live-effects-0.4.1.json"
 else
   open /Applications/suya-unduck.app --args --show
 fi
-printf 'Installed and opened suya-unduck 0.4.0. Previous app/settings backed up locally.\n'
+printf 'Installed and opened suya-unduck 0.4.1. Previous app/settings backed up locally.\n'

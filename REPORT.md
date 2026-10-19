@@ -1,25 +1,15 @@
-# suya-unduck 0.4.0 verification report
+# suya-unduck 0.4.1 verification report
 
-## Confirmed behavior from 0.3.0
+## Todoist completion sound at 100%
 
-The user confirmed YouTube stays at normal loudness during a WhatsApp call. The installed browser path also passed a metadata-only transport check at 80% and 50%, with advancing callbacks, nonzero signal and zero format errors. This release retains the enabled 500 ms device guard and unity media processing that passed that call check.
+The user reported completion sounds only above 100%, including off-call. Live 0.4.0 metadata showed Todoist idle with a running pipeline at a boosted volume; logs also showed repeated Todoist pipeline starts/stops. At unity, the old policy kept only the system-effects source ready while idle. A regular app's short sound had to activate discovery/setup, and the pipeline was removed again when the sound ended. Boosting counted as a custom setting and retained the pipeline across silence.
 
-## Screenshot sound investigation
+While unducking is enabled, eligible user-facing apps with an existing Core Audio session now keep their path ready at unity as well. This extends the readiness policy already used for system effects; it does not add gain. The change covers short app sounds generally, rather than hardcoding Todoist. Call/microphone and background-process protections still apply, and disabling unducking removes default-volume idle app paths. No new settings are exposed. Keeping more eligible paths ready deliberately uses some background resources to prevent transient sounds being caught during setup/teardown.
 
-The user reported that CleanShot and native screenshots are silent during a WhatsApp call, but CleanShot sounds normally off-call. A 40 ms activity observer saw very short output events from `systemsoundserverd` for the screenshots. Both main and system-effects outputs were the same device. No application mute/route preference accounted for the missing sound.
+All 93 checks passed normally and under Thread Sanitizer, including 2,000,000 concurrent atomic operations. Regression tests cover ready paths at 99%, 100% and 101% without a call, disabling, protected-call bypass, idle health, gain/DSP and concurrency. After installing 0.4.1 and setting Todoist to exactly 100%, the user confirmed that its completion sound plays. The installed runtime also showed Todoist at volume 1 with an idle, ready pipeline and no error. This is listening acceptance for the reported Todoist case, not a new call-time acceptance test.
 
-The old engine excluded the background system-effects source from automatic replay. Its brief events can also end before one-second app discovery. The new engine groups that source as System sounds and keeps its unity replay path ready while unducking is enabled, even while idle. It uses the actual system-effects output, including when that differs from main. Idle sources no longer trigger the active-source stall watchdog; format errors still fail safe. Disabling unducking removes the idle replay; call and microphone protections remain in place. After allowing the final build, the user confirmed that both CleanShot and native screenshot sounds work during the WhatsApp call. This is user listening acceptance; it does not isolate the relative contribution of replay versus device guard writes.
+## Preserved verified behavior
 
-## UI
+The user confirmed normal YouTube loudness in a WhatsApp call with 0.3.0, and both CleanShot and native screenshot sounds in a WhatsApp call with 0.4.0. The 0.4.0 effects check recorded advancing callbacks, nonzero peak and zero format errors. This patch preserves the enabled device guard, system-effects routing, supplied icon and compact UI. These earlier acceptance results are historical, not a new physical test of 0.4.1.
 
-- Supplied transparent waveform artwork replaces only the menu-bar icon. The application icon remains unchanged.
-- Centered SF Symbol chevrons replace baseline-aligned arrow text.
-- Compact shared app rows combine app name/output and slider/mute. Hardware and apps share one scroll view. The main panel is 380 × 560 points, constrained to the available screen height.
-- Main output level/mute, system-effects output, microphone level/mute/input and per-app output choices remain directly available.
-- Panel fade/resize, navigation, picker/dialog/toast transitions, switch motion, hover/press feedback and slider interaction use short animations. Reduce Motion removes motion effects. Sliders follow dragging directly, without lagging value animations.
-
-## Verification boundaries
-
-All 89 checks passed normally and under Thread Sanitizer, including 2,000,000 concurrent atomic operations. Automated policy/DSP/concurrency checks include idle effects prearming, unity gain, effects-device selection, disabling and protected-call bypass. Fixture renders cover light/dark mixer, output picker, settings, permission, reset and empty states. The user confirmed both screenshot sounds during a WhatsApp call. Physical multi-device routing, a fresh simultaneous media/call clarity check and motion feel remain separate device/UI acceptance checks. Metadata-only live checks do not establish audible loudness or absence of ticks.
-
-Machine-specific activity logs, live screenshots and diagnostic snapshots stay in ignored local evidence. Public screenshots contain fixtures only. The installer preserves previous app/settings backups. Ad-hoc signing can require renewed macOS audio permission for a changed binary.
+Private runtime snapshots, live screenshots and device/process identifiers stay in ignored local evidence. Public screenshots remain fixtures. The installer backs up the previous app/settings; ad-hoc signing may require fresh macOS audio permission for the changed binary.

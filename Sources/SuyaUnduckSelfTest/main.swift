@@ -208,4 +208,13 @@ check(Decision.desired(setting: AppSetting(), global: effectsPolicy, protected: 
 check(!PipelineHealth.shouldStop(failed: false, stalledChecks: 20, sourcePlaying: false), "idle effects tap is not torn down for waiting on its first short sound")
 check(PipelineHealth.shouldStop(failed: false, stalledChecks: 8, sourcePlaying: true), "stalled playing source still fails safe")
 check(PipelineHealth.shouldStop(failed: true, stalledChecks: 0, sourcePlaying: false), "format errors fail safe even while idle")
+// A short UI sound must find an already running path at unity, just as above unity.
+var briefPolicy = Settings(); briefPolicy.duckApproved = true
+for volume: Float in [0.99, 1, 1.01] {
+    var briefSetting = AppSetting(); briefSetting.volume = volume
+    let ready = Decision.desired(setting: briefSetting, global: briefPolicy, protected: false, playing: false, silentSeconds: .infinity, call: false, defaultOutput: "speakers", available: ["speakers"], keepReady: true)
+    check(ready?.running == true && ready?.gain == GainMath.gain(forSlider: volume), "brief app sound path remains ready below, at and above 100 percent without a call")
+}
+let offPolicy = Settings()
+check(Decision.desired(setting: AppSetting(), global: offPolicy, protected: false, playing: false, silentSeconds: .infinity, call: false, defaultOutput: "speakers", available: ["speakers"], keepReady: true) == nil, "disabling unduck leaves default unity app audio on the original path")
 print("PASS: \(tests) suya-unduck self-tests, including 2,000,000 concurrent atomic operations")

@@ -1,4 +1,4 @@
-# suya-unduck 0.4.0 verification
+# suya-unduck 0.4.1 verification
 
 ## Automated
 
@@ -28,3 +28,5 @@ If something fails, **Copy support info**. Local runtime metadata under the app'
 
 8. During a WhatsApp call, take CleanShot and native screenshots. Both must sound normally while YouTube stays at normal volume. Repeat off-call and with system effects routed to a different device. A prearmed pipeline with nonzero peak proves transport, not listening acceptance.
 9. Scroll from the hardware controls through all app rows in one viewport. Inspect centered chevrons and the supplied waveform menu icon. Check hover, presses, switches, slider drag/focus, navigation, picker/dialog dismissal and panel open/close with Reduce Motion both enabled and disabled.
+
+10. Off-call, set Todoist to exactly 100% and complete a task yourself. Listen for the completion sound. Repeat after a pause, at 99% and 101%, then return to 100%. The unity path should remain ready during silence without start/stop churn. Repeat during a call. Do not complete the user's real tasks automatically as an audio test.

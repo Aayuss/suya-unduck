@@ -2,7 +2,7 @@
 
 A compact native Apple Silicon macOS menu bar audio mixer with neutral surfaces, subtle green accents and Reduce Motion-aware transitions. Hardware and apps share one scroll area.
 
-- **App volume:** music, browsers and call apps get independent volume and mute controls. Apps with an audio session stay visible while paused.
+- **App volume:** music, browsers and call apps get independent volume and mute controls. Apps with an audio session stay visible while paused. While unducking is enabled, eligible app paths stay ready at 100% so short completion/notification sounds do not wait for setup.
 - **Main output:** choose the Mac's default audio output and adjust its hardware volume/mute when supported.
 - **System sounds:** select the device for alerts and screenshot effects. The effects replay path stays ready for short sounds while unducking is enabled.
 - **Per-app output:** choose a specific device for an app, or **Use main output**. A specific choice overrides the main output. A disconnected device temporarily falls back to main and returns when reconnected.

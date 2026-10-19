@@ -150,7 +150,8 @@ import CAtomics
         for app in apps {
             let setting = settings.apps[app.id] ?? AppSetting()
             let effects = app.id == "com.apple.systemsoundserverd"
-            let protected = app.protected || settings.extraProtected.contains(app.id) || (!Hardware.isUserFacing(app) && !effects)
+            let userFacing = Hardware.isUserFacing(app)
+            let protected = app.protected || settings.extraProtected.contains(app.id) || (!userFacing && !effects)
             let appDefault = effects ? devices.first { $0.id == Hardware.defaultDevice(systemSounds: true) }?.uid ?? defaultUID : defaultUID
             if app.playing { lastOutput[app.id] = Date() }
             let silentSeconds = app.playing ? 0 : lastOutput[app.id].map { Date().timeIntervalSince($0) } ?? .infinity
@@ -159,7 +160,7 @@ import CAtomics
                     nextBoundary = min(nextBoundary ?? .infinity, threshold - silentSeconds)
                 }
             }
-            guard let desired = Decision.desired(setting: setting, global: settings, protected: protected, playing: app.playing, silentSeconds: silentSeconds, call: callActive, defaultOutput: appDefault, available: available, keepReady: effects),
+            guard let desired = Decision.desired(setting: setting, global: settings, protected: protected, playing: app.playing, silentSeconds: silentSeconds, call: callActive, defaultOutput: appDefault, available: available, keepReady: !protected && (effects || userFacing)),
                   let device = devices.first(where: { $0.uid == desired.outputUID }) else { remove(app.id); continue }
             let recent = (failures[app.id] ?? []).filter { Date().timeIntervalSince($0) < 60 }
             failures[app.id] = recent
@@ -249,7 +250,7 @@ import CAtomics
              "route": settings.apps[app.id]?.output ?? (app.id == "com.apple.systemsoundserverd" ? "system-output" : "main-output"),
              "pipeline": pipelines[app.id] != nil, "error": errors[app.id] ?? ""]
         }
-        let data: [String: Any] = ["version": "0.4.0", "apps": rows, "unduck": duck.status, "enabled": settings.duckApproved,
+        let data: [String: Any] = ["version": "0.4.1", "apps": rows, "unduck": duck.status, "enabled": settings.duckApproved,
             "mainOutput": Hardware.defaultDevice(), "systemOutput": Hardware.defaultDevice(systemSounds: true), "input": Hardware.defaultDevice(input: true)]
         guard let json = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]),
               let signature = String(data: json, encoding: .utf8), signature != snapshotSignature else { return }
